@@ -1,0 +1,239 @@
+---
+title: "Housing / Census Exploration"
+author: "Jessica Hirsch"
+date: '2022-04-11'
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    theme: spacelab
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(here)
+library(tidycensus)
+```
+
+```{r}
+#source(here::here("scripts", "get_hud_data.R"))
+```
+
+```{r}
+hud <- read_csv(here::here("Data_Transformation", "hud_2020_tract_joined.csv"))
+```
+
+```{r}
+glimpse(hud)
+```
+
+```{r}
+hud_de <- 
+hud %>% 
+  select(state, entities, place, cbsa, code, program_label, name, everything(), -where(is.logical), -gsl, -sumlevel, -Quarter, -states, -program) %>% 
+  mutate(across(where(is.double), ~ if_else(. == -1, NA_real_, .))) %>% 
+  filter(state == "DE",
+         program_label == "Housing Choice Vouchers")
+```
+
+```{r}
+hud_de %>% 
+  ggplot(aes(x = total_units)) +
+  geom_histogram()
+```
+
+```{r}
+hud_de %>% 
+  pivot_longer(where(is.double),
+               names_to = "col") %>%
+  mutate(value = if_else(value == -4, NA_real_, value)) %>% 
+  ggplot(aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~ col, scales = "free_x")
+```
+
+
+# American Community Survey
+
+```{r}
+load_variables(2018, "acs5")
+```
+
+```{r}
+de_gender <- 
+get_acs(geography = "tract",
+        variables = c(total = "B01001_001",
+                      male = "B01001_002"),
+        state = "DE",
+        output = "wide")
+```
+
+```{r}
+de_gender %>% 
+  mutate(male_percent = maleE / totalE) %>% 
+  arrange(desc(male_percent))
+```
+
+```{r}
+pop_estimates <- c(
+  pe.med_inc             = 'B06011_001',    # median income
+  pe.med_f               = 'B10010_001',    # median family income
+  pe.hh_inc              = 'B19001_001',    # household income in the past 12 months
+  pe.tot_hh              = 'B11001_001',    # total households
+  pe.renter_householders = 'B07013_003',    # total renter households
+  pe.tot_pop_rent        = 'B25008_003',    # totol population in renter occupied homes
+  pe.tot_hu              = 'B25001_001',    # total housing units
+  pe.pop_hu              = 'B25008_001',    # total population in occupied housing units
+  pe.popTotE             = 'B01003_001'     # total population
+)
+
+
+# Select the columns corresponding to the counts of hte
+# households who are paying 30 percent or more on rent
+# https://censusreporter.org/data/table/?table=B25070&geo_ids=140%7C04000US10&primary_geo_id=04000US10#valueType%7Cestimate
+income_percent <- c(
+  inc_per.rent_00 = 'B25070_002',    # households paying less than 10.0 percent in rent
+  inc_per.rent_10 = 'B25070_003',    # households paying 10.0 to 14.9 percent in rent
+  inc_per.rent_15 = 'B25070_004',    # households paying 15.0 to 19.9 percent in rent
+  inc_per.rent_20 = 'B25070_005',    # households paying 20.0 to 24.9 percent in rent
+  inc_per.rent_25 = 'B25070_006',    # households paying 25.0 to 29.9 percent in rent
+  inc_per.rent_30 = 'B25070_007',    # households paying 30.0 to 34.9 percent in rent
+  inc_per.rent_35 = 'B25070_008',    # households paying 35.0 to 39.9 percent in rent
+  inc_per.rent_40 = 'B25070_009',    # households paying 40.0 to 49.9 percent in rent
+  inc_per.rent_50 = 'B25070_010'     # households paying 50.0 percent or more in rent
+)
+
+# Get Rent Categories x Household Income Table (B25074)
+# For each income category and percentage rent spend on household income:
+# (10k = less than 10k, 20k = less than 20k, 35k = less than 35k, 50k = less than, and 75k = less than 75k)
+percent_by_income <- c(
+  income.rent_30_10k = 'B25074_006',
+  income.rent_35_10k = 'B25074_007',
+  income.rent_40_10k = 'B25074_008',
+  income.rent_50_10k = 'B25074_009',
+  income.rent_30_20k = 'B25074_015',
+  income.rent_35_20k = 'B25074_016',
+  income.rent_40_20k = 'B25074_017',
+  income.rent_50_20k = 'B25074_018',
+  income.rent_30_35k = 'B25074_024',
+  income.rent_35_35k = 'B25074_025',
+  income.rent_40_35k = 'B25074_026',
+  income.rent_50_35k = 'B25074_027',
+  income.rent_30_50k = 'B25074_033',
+  income.rent_35_50k = 'B25074_034',
+  income.rent_40_50k = 'B25074_035',
+  income.rent_50_50k = 'B25074_036',
+  income.rent_30_75k = 'B25074_042',
+  income.rent_35_75k = 'B25074_043',
+  income.rent_40_75k = 'B25074_044',
+  income.rent_50_75k = 'B25074_045'
+)
+
+cost_by_size <- c(
+  cost.med_rent  = 'B25031_001',    # median gross rent (total)
+  cost.0_bed     = 'B25031_002',    # median gross rent (no bedroom)
+  cost.1_bed     = 'B25031_003',    # median gross rent (one bedroom)
+  cost.2_bed     = 'B25031_004',    # median gross rent (two bedrooms)
+  cost.3_bed     = 'B25031_005',    # median gross rent (three bedrooms)
+  cost.4_bed     = 'B25031_006',    # median gross rent (four bedrooms)
+  cost.5_bed     = 'B25031_007'     # median gross rent (five bedrooms)
+)
+```
+
+```{r}
+all_census_vars <- c(pop_estimates,income_percent,percent_by_income,cost_by_size)
+```
+
+```{r}
+acs_df <- get_acs(
+  geography = "tract",
+  variables = all_census_vars,
+  state = "DE"
+)
+```
+
+```{r}
+acs_df <- 
+  acs_df %>% 
+  select(-moe)
+```
+
+```{r}
+acs_df %>% 
+  filter(str_starts(variable,"cost")) %>% 
+  ggplot(aes(x = estimate)) +
+  geom_histogram() +
+  facet_wrap(~ variable)
+```
+
+```{r}
+acs_df %>% 
+  filter(str_starts(variable,"income")) %>% 
+  ggplot(aes(x = estimate)) +
+  geom_histogram() +
+  facet_wrap(~ variable)
+```
+
+```{r}
+acs_df %>% 
+  filter(str_starts(variable,"inc_per")) %>% 
+  ggplot(aes(x = estimate)) +
+  geom_histogram() +
+  facet_wrap(~ variable)
+```
+
+```{r}
+acs_df %>% 
+  filter(str_starts(variable,"pe")) %>% 
+  ggplot(aes(x = estimate)) +
+  geom_histogram() +
+  facet_wrap(~ variable, scales = "free_x")
+```
+
+```{r}
+acs_df_wide <- 
+acs_df %>% 
+  pivot_wider(names_from = variable, 
+              values_from = estimate)
+```
+
+# Joins
+
+```{r}
+housing <- 
+acs_df_wide %>% 
+left_join(hud_de,
+  by = c("GEOID" = "code"))
+```
+
+how does the number of reported households to use section 8 vouchers relates to the total number of houeholds in a community?
+
+```{r}
+housing %>% 
+  mutate(number_reported = if_else(number_reported %in% c(-5, -4, -1), NA_real_, number_reported)) %>% 
+  ggplot(aes(x = pe.tot_hh,
+             y = number_reported)) + 
+  geom_point()
+```
+
+how does the cost of different size rental units relate to the people per unit?
+
+```{r}
+housing %>% 
+  select(GEOID, starts_with("cost"), people_per_unit) %>% 
+  mutate(people_per_unit = if_else(people_per_unit %in% c(-5, -4, -1), NA_real_, people_per_unit)) %>%
+  pivot_longer(starts_with("cost"),
+               names_to = "type") %>% 
+  filter(type != "cost.med_rent") %>% 
+  ggplot(aes(x = people_per_unit,
+             y = value)) +
+  geom_point() +
+  facet_wrap(~ type)
+```
+
